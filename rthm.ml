@@ -55,6 +55,12 @@ module Rthm : Rthm_kernel = struct
 
   let reset_rcount() = (nfvars := 0; nftys := 0; nbvars := 0)
 
+  let is_print = ref true
+
+  let print_on() = is_print := true
+
+  let print_off() = is_print := false
+
   let mk_rthm th =
     let th = conv_thm beta_eta_conv th in
     let ftys = itlist (union o type_vars_in_term) ((concl th)::(hyp th)) [] in
@@ -72,7 +78,9 @@ module Rthm : Rthm_kernel = struct
   let req_mp (Rhythm(asl1,c1,pairs1,rsl1,invoke1)) (Rhythm(asl2,c2,pairs2,rsl2,invoke2)) =
     let v = mk_var(new_fvar(),bool_ty) in
     distill(asl1 @ asl2,v,(c1,mk_eq(c2,v))::(pairs1 @ pairs2),rsl1 @ rsl2,
-            fun ins -> EQ_MP (invoke1 ins) (invoke2 ins))
+            fun ins -> let th1 = invoke1 ins and th2 = invoke2 ins in
+                       let th = EQ_MP th1 th2 in
+                       (if !is_print then print_endline ("EQ_MP\t" ^ (ss_thm th) ^ "\t" ^ (ss_thm th1) ^ "\t" ^ (ss_thm th2)) else (); th))
 
   let rtrans (Rhythm(asl1,c1,pairs1,rsl1,invoke1)) (Rhythm(asl2,c2,pairs2,rsl2,invoke2)) =
     let aty = mk_vartype(new_fty()) in
@@ -81,7 +89,9 @@ module Rthm : Rthm_kernel = struct
     let z = mk_var(new_fvar(),aty) in
     distill(asl1 @ asl2,mk_eq(x,z),
             (c1,mk_eq(x,y))::(c2,mk_eq(y,z))::(pairs1 @ pairs2),rsl1 @ rsl2,
-            fun ins -> TRANS (invoke1 ins) (invoke2 ins))
+            fun ins -> let th1 = invoke1 ins and th2 = invoke2 ins in
+                       let th = TRANS th1 th2 in
+                       (if !is_print then print_endline ("TRANS\t" ^ (ss_thm th) ^ "\t" ^ (ss_thm th1) ^ "\t" ^ (ss_thm th2)) else (); th))
 
   let rmk_comb (Rhythm(asl1,c1,pairs1,rsl1,invoke1)) (Rhythm(asl2,c2,pairs2,rsl2,invoke2)) =
     let aty = mk_vartype(new_fty()) and bty = mk_vartype(new_fty()) in
@@ -89,7 +99,9 @@ module Rthm : Rthm_kernel = struct
     let u = mk_var(new_fvar(),aty) and v = mk_var(new_fvar(),aty) in
     distill(asl1 @ asl2,mk_eq(mk_comb(s,u),mk_comb(t,v)),
             (c1,mk_eq(s,t))::(c2,mk_eq(u,v))::(pairs1 @ pairs2),rsl1 @ rsl2,
-            fun ins -> conv_thm beta_eta_conv (MK_COMB (invoke1 ins,invoke2 ins)))
+            fun ins -> let th1 = invoke1 ins and th2 = invoke2 ins in
+                       let th = conv_thm beta_eta_conv (MK_COMB (th1,th2)) in
+                       (if !is_print then print_endline ("MK_COMB\t" ^ (ss_thm th) ^ "\t" ^ (ss_thm th1) ^ "\t" ^ (ss_thm th2)) else (); th))
 
   let rdeduct (Rhythm(asl1,c1,pairs1,rsl1,invoke1)) (Rhythm(asl2,c2,pairs2,rsl2,invoke2)) mask1 mask2 =
     let rec work asl c mask : (term list * (term * term) list) =
@@ -102,7 +114,9 @@ module Rthm : Rthm_kernel = struct
     let asl1,ps1 = work asl1 c2 mask1 in
     let asl2,ps2 = work asl2 c1 mask2 in
     distill(asl1 @ asl2,mk_eq(c1,c2),ps1 @ ps2 @ pairs1 @ pairs2,rsl1 @ rsl2,
-            fun ins -> DEDUCT_ANTISYM_RULE (invoke1 ins) (invoke2 ins))
+            fun ins -> let th1 = invoke1 ins and th2 = invoke2 ins in
+                       let th = DEDUCT_ANTISYM_RULE th1 th2 in
+                       (if !is_print then print_endline ("DEDUCT\t" ^ (ss_thm th) ^ "\t" ^ (ss_thm th1) ^ "\t" ^ (ss_thm th2)) else (); th))
 
   let rabs (Rhythm(asl,c,pairs,rsl,invoke)) =
     let aty = mk_vartype(new_fty()) and bty = mk_vartype(new_fty()) in
@@ -111,7 +125,9 @@ module Rthm : Rthm_kernel = struct
     let mc = mk_var(name,aty) in
     distill(asl,mk_eq(u,v),(c,mk_eq(mk_comb(u,mc),mk_comb(v,mc)))::pairs,
             (map (fun x -> x,name) (u::v::asl)) @ rsl,
-            fun ins -> conv_thm eta_conv (ABS (inst_term ins mc) (invoke ins)))
+            fun ins -> let th' = invoke ins in
+                       let th = conv_thm eta_conv (ABS (inst_term ins mc) th') in
+                       (if !is_print then print_endline ("ABS\t" ^ (ss_thm th) ^ "\t" ^ (ss_thm th')) else (); th))
 
   (* Higher-order semi-matching
    * I guess this procedure might be decidable
@@ -132,27 +148,37 @@ module Rthm : Rthm_kernel = struct
       | [] -> hol_unify const_ty const_var pairs rsl in
     let ins = work asl asl' ((c,c')::pairs) in
     match ins with
-      Some(ins) -> (hins := ins; ins,invoke ins)
+      Some(ins) -> ins,invoke ins
     | None -> failwith "rmatch"
 
 end;;
 
 include Rthm;;
 
+let string_of_rthm rth =
+  let asl,tm,pairs,rsl = dest_rthm rth in
+  (if not (asl = []) then
+     (rev_itlist (fun tm s -> s ^ ", " ^ (ss_term tm)) (tl asl) (ss_term (hd asl)))
+     ^ " "
+   else "") ^
+  "|- " ^ (ss_term tm) ^
+  (if not (pairs = []) then
+     let tm,tm' = hd pairs in
+     let s = (ss_term tm) ^ "," ^ (ss_term tm') in
+     " [" ^
+     (rev_itlist (fun (tm1,tm2) s -> s ^ "; " ^ (ss_term tm1) ^ "," ^ (ss_term tm2)) (tl pairs) s)
+     ^ "]"
+   else "") ^
+  (if not (rsl = []) then
+     let tm,name = hd rsl in
+     let s = (ss_term tm) ^ "," ^ name in
+     " {" ^
+     (rev_itlist (fun (tm,name) s -> s ^ "; " ^ (ss_term tm) ^ "," ^ name) (tl rsl) s)
+     ^ "}"
+   else ""
+  );;
 
 let pp_print_rthm fmt rth =
-  let ss_term tm =
-    let s = string_of_term tm in
-    let ls = map (fun x -> if x = "\n" then " " else x) (explode s) in
-    let rec work ls =
-      match ls with
-        a::(b::t) -> if a = " " then
-                       if b = " " then work (b::t)
-                       else a::b::(work t)
-                     else a::(work (b::t))
-      | _ -> ls in
-    String.concat "" (work ls) in
-
   let asl,tm,pairs,rsl = dest_rthm rth in
   (if not (asl = []) then
     (if !print_all_thm then

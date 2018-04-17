@@ -150,3 +150,11 @@ let ss_term tm =
     | _ -> ls in
   String.concat "" (work ls);;
 
+(* string_of_thm without spaces and newlines *)
+let ss_thm th =
+  let asl,c = dest_thm th in
+  (if asl <> [] then
+     (rev_itlist (fun tm s -> s ^ ", " ^ (ss_term tm)) (tl asl) (ss_term (hd asl))) ^ " "
+   else ""
+  ) ^ "|- " ^ (ss_term c);;
+

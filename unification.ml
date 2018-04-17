@@ -8,6 +8,7 @@ module type Hunify_kernel =
 
     val inst_term : instor -> term -> term
     val inst_thm : instor -> thm -> thm
+    val simplify : string list -> string list -> (term * term) list -> (term * string) list -> (term * term) list * (term * string) list * instor
     val hol_unify : string list -> string list -> (term * term) list -> (term * string) list -> instor option
     val hol_quick_check : (term * term) list -> (term * string) list -> bool
 
@@ -224,7 +225,7 @@ module Hunify : Hunify_kernel = struct
 
     (* each pair of obj must have matched type *)
     let rec work dep (obj : (term * term) list) (rsl : (term * string) list) (tyins,tmins) : (instor option) =
-      if exists (fun (a,b) -> (tm_size a) >= 40) tmins then None else
+      if exists (fun (a,b) -> (tm_size a) >= 20) tmins then None else
       if exists (fun (a,b) -> (tm_size a) >= 100 || (tm_size b) >= 100) obj then None else (
       (* check maximum depth *)
       (*
@@ -234,6 +235,12 @@ module Hunify : Hunify_kernel = struct
       (* simplification *)
       try let obj,rsl,ins = simplify const_ty const_var obj rsl in
           let tyins,tmins = merge_ins (tyins,tmins) ins in
+          (*
+          printf "%d\n%!" dep;
+          List.iter (fun (u,v) -> Printf.printf "0\t%s\t%s\n%!" (ss_term u) (ss_term v)) obj;
+          List.iter (fun (u,v) -> Printf.printf "1\t%s\t%s\n%!" (ss_term u) v) rsl;
+          print_endline "";
+          *)
           try let tm1,tm2 = try find (fun (u,v) -> not (head_free const_var v)) obj
                             with Failure "find" ->
                               let tm2,tm1 = find (fun (u,v) -> not (head_free const_var u)) obj in
@@ -270,9 +277,6 @@ module Hunify : Hunify_kernel = struct
                 with Failure "type_unify" -> None in
               itlist noname (0--((length bvars)-1)) None
           with Failure "find" -> (
-            print_endline "flex-flex";
-            List.iter (fun (u,v) -> Printf.printf "1\t%s\t\t\t%s\n%!" (ss_term u) (ss_term v)) obj;
-            print_endline "";
             let tml = (let ps1,ps2 = unzip obj in ps1 @ ps2) @ (let sl,_ = unzip rsl in sl) in
             let fvars = filter (fun v -> not (has_prefix (name_of v) "mc")) (freesl tml) in
             let constantize v =
@@ -286,12 +290,17 @@ module Hunify : Hunify_kernel = struct
 
     fun (obj : (term * term) list) (rsl : (term * string) list) ->
       try let obj,rsl,ins = init_data const_ty const_var obj rsl in
+          (try let obj',rsl',ins' = simplify const_ty const_var obj rsl in
+               List.iter (fun (u,v) -> Printf.printf "0\t%s\t%s\n%!" (ss_term u) (ss_term v)) obj';
+               List.iter (fun (u,v) -> Printf.printf "0\t%s\t%s\n%!" (ss_term u) v) rsl';
+               print_endline ""
+           with Failure _ -> ());
           work 0 obj rsl ins
       with Failure "init_data" -> None
 
   let hol_quick_check obj rsl =
-    try (let obj,rsl,ins = init_data [] [] obj rsl in
-         ignore (simplify [] [] obj rsl); true )
+    try let obj,rsl,ins = init_data [] [] obj rsl in
+        (ignore (simplify [] [] obj rsl); true)
     with Failure s when s = "init_data" || s = "simplify" -> false
 
 end;;
